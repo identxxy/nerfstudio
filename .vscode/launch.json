@@ -92,6 +92,14 @@
       "program": "scripts/train.py",
       "console": "integratedTerminal",
       "args": ["semantic_nerf"]
+    },
+    {
+      "name": "Python: process metacam",
+      "type": "python",
+      "request": "launch",
+      "program": "/home/ns/.local/bin/ns-process-data",
+      "console": "integratedTerminal",
+      "args": ["metacam", "--data", "~/data/crc_test", "--output", "~/tmp", "--mask", "~/nerfstudio/data/masks"]
     }
   ]
 }

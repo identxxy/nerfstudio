@@ -18,6 +18,7 @@ from nerfstudio.process_data import (
     colmap_utils,
     hloc_utils,
     insta360_utils,
+    metacam_utils,
     metashape_utils,
     polycam_utils,
     process_data_utils,
@@ -818,6 +819,125 @@ class ProcessRealityCapture:
         CONSOLE.rule()
 
 
+@dataclass
+class ProcessMetacam:
+    """Process Metacam data into a nerfstudio dataset.
+
+    This script assumes that cameras have been aligned using Metacam.
+
+    This script does the following:
+
+    1. Scales images to a specified size.
+    2. Converts RealityCapture poses into the nerfstudio format.
+    """
+
+    data: Path
+    """Path to a folder of metacam processed data. The folder should conatain `odometry_csv.csv"""
+    output_dir: Path
+    """Path to the output directory."""
+    mask: Path = Path()
+    """Mask images folder containing `[front/left/right]_mask.jpg`"""
+    num_downscales: int = 3
+    """Number of times to downscale the images. Downscales by 2 each time. For example a value of 3
+        will downscale the images by 2x, 4x, and 8x."""
+    max_dataset_size: int = 600
+    """Max number of images to train on. If the dataset has more, images will be sampled approximately evenly. If -1,
+    use all images."""
+    verbose: bool = False
+    """If True, print extra logging."""
+
+    def main(self) -> None:
+        """Process images into a nerfstudio dataset."""
+
+        csv = self.data.joinpath("odometry_csv.csv")
+        lidar_camera_calib = self.data.joinpath("lidar_camera_calib_result.txt")
+        camera_calib = self.data.joinpath("camera_calibration.json")
+        pcd = self.data.joinpath("scans.pcd")
+
+        compulsory_files_l = [csv, camera_calib, lidar_camera_calib, pcd]
+        for f in compulsory_files_l:
+            if not f.exists():
+                raise ValueError(f"File {f} doesn't exist. Please ensure to load a processed Metacam dataset.")
+
+        if not self.data.joinpath("front").exists():
+            raise ValueError(f"Images folder `front` not found.")
+
+        summary_log = []
+        prefixes = ["front", "left", "right"]
+        masks = {}
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+
+        # lidar and front camera calibration
+        c2l = metacam_utils.read_lidar_camera_calib(lidar_camera_calib)
+
+        # poses csv
+        front_frames = metacam_utils.read_images_and_odom(self.data.joinpath("front"), csv, c2l)
+        num_front_frames = len(front_frames)
+        summary_log.append(f"Got front camera {num_front_frames} images.")
+        if self.max_dataset_size > 0 and 3 * num_front_frames > self.max_dataset_size:
+            summary_log.append(
+                f"Estimate totally {3 * num_front_frames} images, which is larger than max_dataset_size."
+            )
+            summary_log.append(
+                "To change the size of the dataset add the argument [yellow]--max_dataset_size[/yellow] to "
+                f"larger than the current value ({self.max_dataset_size}), or -1 to use all images."
+            )
+
+        # camera calibration
+        cameras = metacam_utils.read_camera_intrisincs_from_json(camera_calib)
+
+        # copy masks
+        for prefix in prefixes:
+            mask_l = list(self.mask.glob(prefix + "*"))
+            if len(mask_l) > 0:
+                mask_dir = self.output_dir / "masks"
+                mask_dir.mkdir(parents=True, exist_ok=True)
+
+                masks[prefix] = mask_dir / mask_l[0].name
+                summary_log.append(f"Loaded mask file {mask_l[0]} to {masks[prefix]}.")
+                metacam_utils.copy_image(mask_l[0], masks[prefix], self.verbose)
+
+        # copy images and write transform.json
+        frames = []
+        num_frames = 0
+        num_total_frames = 0
+        for ff in front_frames:
+            num_frames += 1
+            for prefix in prefixes:
+                f_name = ff["file_name"]
+                prefix_path = self.data.joinpath(prefix)
+                image_path = prefix_path.joinpath(f_name)
+                prefix_dir = self.output_dir.joinpath(prefix)
+                prefix_dir.mkdir(parents=True, exist_ok=True)
+                if not image_path.exists():
+                    summary_log.append(f"{image_path} not found...Skipped")
+                    continue
+                num_total_frames += 1
+                new_image_name = f"{num_frames:04d}" + image_path.suffix
+                frame = {
+                    "file_path": prefix + "/" + new_image_name,
+                    "transform_matrix": (cameras[prefix]["x2f"] @ ff["c2w"]).tolist(),
+                }
+                if prefix in masks.keys():
+                    frame["mask_path"] = "masks/" + masks[prefix].name
+
+                for k in cameras[prefix]["intrinsics"].keys():
+                    frame[k] = cameras[prefix]["intrinsics"][k]
+                frames.append(frame)
+                metacam_utils.copy_image(image_path, prefix_dir.joinpath(new_image_name), self.verbose)
+        summary_log.append(f"Got total camera {num_total_frames} images.")
+
+        output = {"camera_model": CAMERA_MODELS["fisheye"].value, "frames": frames}
+        with open(self.output_dir.joinpath("transforms.json"), "w") as f:
+            json.dump(output, f, indent=4)
+
+        CONSOLE.rule("[bold green]:tada: :tada: :tada: All DONE :tada: :tada: :tada:")
+
+        for summary in summary_log:
+            CONSOLE.print(summary, justify="center")
+        CONSOLE.rule()
+
+
 Commands = Union[
     Annotated[ProcessImages, tyro.conf.subcommand(name="images")],
     Annotated[ProcessVideo, tyro.conf.subcommand(name="video")],
@@ -826,6 +946,7 @@ Commands = Union[
     Annotated[ProcessRealityCapture, tyro.conf.subcommand(name="realitycapture")],
     Annotated[ProcessInsta360, tyro.conf.subcommand(name="insta360")],
     Annotated[ProcessRecord3D, tyro.conf.subcommand(name="record3d")],
+    Annotated[ProcessMetacam, tyro.conf.subcommand(name="metacam")],
 ]
 
 
