@@ -886,7 +886,7 @@ class ProcessMetacam:
         # camera calibration
         cameras = metacam_utils.read_camera_intrisincs_from_json(camera_calib)
 
-        # copy masks
+        # create folder and copy masks
         for prefix in prefixes:
             mask_l = list(self.mask.glob(prefix + "*"))
             if len(mask_l) > 0:
@@ -896,6 +896,9 @@ class ProcessMetacam:
                 masks[prefix] = mask_dir / mask_l[0].name
                 summary_log.append(f"Loaded mask file {mask_l[0]} to {masks[prefix]}.")
                 metacam_utils.copy_image(mask_l[0], masks[prefix], self.verbose)
+            prefix_dir = self.output_dir.joinpath(prefix)
+            metacam_utils.delete_dir(prefix_dir, verbose=True)
+            prefix_dir.mkdir(parents=True, exist_ok=True)
 
         # copy images and write transform.json
         frames = []
@@ -907,16 +910,21 @@ class ProcessMetacam:
                 f_name = ff["file_name"]
                 prefix_path = self.data.joinpath(prefix)
                 image_path = prefix_path.joinpath(f_name)
-                prefix_dir = self.output_dir.joinpath(prefix)
-                prefix_dir.mkdir(parents=True, exist_ok=True)
+                prefix_dir = prefix_dir.parent / prefix
                 if not image_path.exists():
                     summary_log.append(f"{image_path} not found...Skipped")
                     continue
+                if self.max_dataset_size > 0 and num_total_frames >= self.max_dataset_size:
+                    if self.verbose:
+                        summary_log.append(
+                            f"Reached max_dataset_size {self.max_dataset_size}. Ignore following frames."
+                        )
+                    break
                 num_total_frames += 1
                 new_image_name = f"{num_frames:04d}" + image_path.suffix
                 frame = {
                     "file_path": prefix + "/" + new_image_name,
-                    "transform_matrix": (cameras[prefix]["x2f"] @ ff["c2w"]).tolist(),
+                    "transform_matrix": (ff["c2w"] @ cameras[prefix]["x2f"]).tolist(),  # first x2f then f2w.
                 }
                 if prefix in masks.keys():
                     frame["mask_path"] = "masks/" + masks[prefix].name
@@ -927,8 +935,8 @@ class ProcessMetacam:
                 metacam_utils.copy_image(image_path, prefix_dir.joinpath(new_image_name), self.verbose)
         summary_log.append(f"Got total camera {num_total_frames} images.")
 
-        output = {"camera_model": CAMERA_MODELS["fisheye"].value, "frames": frames}
-        with open(self.output_dir.joinpath("transforms.json"), "w") as f:
+        output = {"camera_model": CAMERA_MODELS["fisheye"].value, "frames": frames, "aabb_scale": 16, "scale": 0.2, "offset": [0,0,0]}
+        with open(self.output_dir.joinpath("transforms.json"), "w", encoding="utf-8") as f:
             json.dump(output, f, indent=4)
 
         CONSOLE.rule("[bold green]:tada: :tada: :tada: All DONE :tada: :tada: :tada:")

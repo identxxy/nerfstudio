@@ -97,9 +97,10 @@
       "name": "Python: process metacam",
       "type": "python",
       "request": "launch",
-      "program": "/home/ns/.local/bin/ns-process-data",
+      "program": "C:/Users/xuxin/AppData/Roaming/Python/Python39/Scripts/ns-process-data.exe",
       "console": "integratedTerminal",
-      "args": ["metacam", "--data", "~/data/crc_test", "--output", "~/tmp", "--mask", "~/nerfstudio/data/masks"]
+      "args": ["metacam", "--data", "D:/DATA/metacam/crc_test", "--output", "data/crc_test", "--mask", "C:\\Users\\xuxin\\Source\\Repos\\nerfstudio\\data\\masks",
+      "--max_dataset_size", "-1"]
     }
   ]
 }

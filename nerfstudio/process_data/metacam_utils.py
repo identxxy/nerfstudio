@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 from rich.console import Console
 from scipy import interpolate
-from scipy.spatial.transform import Rotation
+from scipy.spatial.transform import Rotation, Slerp
 
 from nerfstudio.process_data.process_data_utils import CAMERA_MODELS
 from nerfstudio.utils import io
@@ -20,10 +20,10 @@ CONSOLE = Console(width=120)
 def read_lidar_camera_calib(lidar_camera_calib: Path) -> np.ndarray:
     """Read lidar camera calibration file, return the transform matrix camera to lidar."""
     lidar_camera_calib_np = np.loadtxt(lidar_camera_calib)
-    c2l_rot = euler_2_rotation_mat(lidar_camera_calib_np[0:3])
+    l2c_rot = euler_2_rotation_mat(lidar_camera_calib_np[0:3])
     c2l = np.eye(4)
-    c2l[:3, :3] = c2l_rot
-    c2l[:3, 3] = lidar_camera_calib_np[3:6]
+    c2l[:3, :3] = l2c_rot.T
+    c2l[:3, 3] = -l2c_rot.T @ lidar_camera_calib_np[3:6]
     return c2l
 
 
@@ -54,6 +54,7 @@ def read_images_and_odom(front: Path, odom: Path, c2l: np.ndarray) -> List:
     qy = np.array(data[".pose.pose.orientation.y"])
     qz = np.array(data[".pose.pose.orientation.z"])
     qw = np.array(data[".pose.pose.orientation.w"])
+    rots = Rotation.from_quat(np.stack([qx, qy, qz, qw], axis=1))
     # images idx
     frames = []
     camera_time_l = []
@@ -72,23 +73,27 @@ def read_images_and_odom(front: Path, odom: Path, c2l: np.ndarray) -> List:
         ynew = f(xnew)
         return ynew
 
+    slerp = Slerp(timestamp, rots)
+
     new_px = interpolation(timestamp, px, camera_time_np)
     new_py = interpolation(timestamp, py, camera_time_np)
     new_pz = interpolation(timestamp, pz, camera_time_np)
-    new_qx = interpolation(timestamp, qx, camera_time_np)
-    new_qy = interpolation(timestamp, qy, camera_time_np)
-    new_qz = interpolation(timestamp, qz, camera_time_np)
-    new_qw = interpolation(timestamp, qw, camera_time_np)
-    rots = Rotation.from_quat(np.stack([new_qx, new_qy, new_qz, new_qw], axis=1))
+    new_rots = slerp(camera_time_np)
 
-    for i in range(len(frames)):
+    convention = np.array(([0, 0, -1, 0], [-1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 0, 1]))
+    """ Magic ...
+    from opencv to world
+    0 0 -1
+    -1 0 0
+    0 1  0
+    """
+
+    for i, frame in enumerate(frames):
         l2w = np.eye(4)
-        t_vec = np.array([new_px[i], new_py[i], new_pz[i]])
-        rot_inv = rots[i].as_matrix().T
-        l2w[0:3, 0:3] = rot_inv
-        l2w[0:3, 3] = -rot_inv @ t_vec
-        frames[i]["c2w"] = c2l @ l2w
+        l2w[0:3, 0:3] = new_rots[i].as_matrix()
+        l2w[0:3, 3] = np.array([new_px[i], new_py[i], new_pz[i]])
 
+        frame["c2w"] = l2w @ c2l @ convention
     return frames
 
 
@@ -154,31 +159,8 @@ def copy_image(src, dst, verbose=False):
     shutil.copyfile(src, dst)
 
 
-def copy_images(data: Path, front_frames: List, cameras: dict, output: dict) -> List:
-    """Process front frames and cameras"""
+def delete_dir(path, verbose=False):
     summary_log = []
-    prefixes = ["front", "left", "right"]
-    frames = []
-    num_frames = 0
-    num_total_frames = 0
-    for ff in front_frames:
-        num_frames += 1
-        for prefix in prefixes:
-            f_name = ff["file_name"]
-            path = self.data.joinpath(prefix).joinpath(f_name)
-            if not path.exists():
-                summary_log.append(f"{path} not found...Skipped")
-                continue
-            num_total_frames += 1
-            frame = {
-                "file_path": prefix + "/" + f"{num_frames: 04d}" + path.suffix,
-                "transform_matrix": (cameras[prefix]["x2f"] @ ff["c2w"]).tolist(),
-            }
-            for k in cameras[prefix]["intrinsics"].keys():
-                frame[k] = cameras[prefix]["intrinsics"][k]
-            frames.append(frame)
-    summary_log.append(f"Got total camera {num_total_frames} images.")
-
-    output["camera_model"] = CAMERA_MODELS["fisheye"].value
-    output["frames"] = frames
-    return summary_log
+    if verbose:
+        summary_log.append(f"Delete {path}")
+    shutil.rmtree(path, ignore_errors=True)
