@@ -80,20 +80,12 @@ def read_images_and_odom(front: Path, odom: Path, c2l: np.ndarray) -> List:
     new_pz = interpolation(timestamp, pz, camera_time_np)
     new_rots = slerp(camera_time_np)
 
-    convention = np.array(([0, 0, -1, 0], [-1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 0, 1]))
-    """ Magic ...
-    from opencv to world
-    0 0 -1
-    -1 0 0
-    0 1  0
-    """
-
     for i, frame in enumerate(frames):
         l2w = np.eye(4)
         l2w[0:3, 0:3] = new_rots[i].as_matrix()
         l2w[0:3, 3] = np.array([new_px[i], new_py[i], new_pz[i]])
 
-        frame["c2w"] = l2w @ c2l @ convention
+        frame["c2w"] = l2w @ c2l
     return frames
 
 

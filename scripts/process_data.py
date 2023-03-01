@@ -904,6 +904,14 @@ class ProcessMetacam:
         frames = []
         num_frames = 0
         num_total_frames = 0
+        cv2world = np.array([[0, 0, 1, 0], [-1, 0, 0, 0], [0, -1, 0, 0], [0, 0, 0, 1]])
+        """ Magic ...
+        from opencg to world
+        0 0 1
+        -1 0 0
+        0 -1  0
+        """
+        cg2cv = np.array([[1, 0, 0, 0], [0, -1, 0, 0], [0, 0, -1, 0], [0, 0, 0, 1]])
         for ff in front_frames:
             num_frames += 1
             for prefix in prefixes:
@@ -922,10 +930,10 @@ class ProcessMetacam:
                     break
                 num_total_frames += 1
                 new_image_name = f"{num_frames:04d}" + image_path.suffix
-                frame = {
-                    "file_path": prefix + "/" + new_image_name,
-                    "transform_matrix": (ff["c2w"] @ cameras[prefix]["x2f"]).tolist(),  # first x2f then f2w.
-                }
+                x2f = cameras[prefix]["x2f"]
+                f2w = ff["c2w"] @ cv2world
+                transform_matrix = f2w @ x2f @ cg2cv
+                frame = {"file_path": prefix + "/" + new_image_name, "transform_matrix": transform_matrix.tolist()}
                 if prefix in masks.keys():
                     frame["mask_path"] = "masks/" + masks[prefix].name
 
@@ -935,7 +943,13 @@ class ProcessMetacam:
                 metacam_utils.copy_image(image_path, prefix_dir.joinpath(new_image_name), self.verbose)
         summary_log.append(f"Got total camera {num_total_frames} images.")
 
-        output = {"camera_model": CAMERA_MODELS["fisheye"].value, "frames": frames, "aabb_scale": 16, "scale": 0.2, "offset": [0,0,0]}
+        output = {
+            "camera_model": CAMERA_MODELS["fisheye"].value,
+            "frames": frames,
+            "aabb_scale": 16,
+            "scale": 0.2,
+            "offset": [0, 0, 0],
+        }
         with open(self.output_dir.joinpath("transforms.json"), "w", encoding="utf-8") as f:
             json.dump(output, f, indent=4)
 
