@@ -837,9 +837,8 @@ class ProcessMetacam:
     """Path to the output directory."""
     mask: Path = Path()
     """Mask images folder containing `[front/left/right]_mask.jpg`"""
-    num_downscales: int = 3
-    """Number of times to downscale the images. Downscales by 2 each time. For example a value of 3
-        will downscale the images by 2x, 4x, and 8x."""
+    num_downsample: int = 2
+    """Scales to downsample"""
     max_dataset_size: int = 600
     """Max number of images to train on. If the dataset has more, images will be sampled approximately evenly. If -1,
     use all images."""
@@ -868,7 +867,7 @@ class ProcessMetacam:
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
         # lidar and front camera calibration
-        c2l = metacam_utils.read_lidar_camera_calib(lidar_camera_calib)
+        c2l = metacam_utils.inverse_transform(metacam_utils.read_lidar_camera_calib(lidar_camera_calib))
 
         # poses csv
         front_frames = metacam_utils.read_images_and_odom(self.data.joinpath("front"), csv, c2l)
@@ -888,6 +887,7 @@ class ProcessMetacam:
 
         # create folder and copy masks
         for prefix in prefixes:
+            # mask
             mask_l = list(self.mask.glob(prefix + "*"))
             if len(mask_l) > 0:
                 mask_dir = self.output_dir / "masks"
@@ -896,37 +896,33 @@ class ProcessMetacam:
                 masks[prefix] = mask_dir / mask_l[0].name
                 summary_log.append(f"Loaded mask file {mask_l[0]} to {masks[prefix]}.")
                 metacam_utils.copy_image(mask_l[0], masks[prefix], self.verbose)
-            prefix_dir = self.output_dir.joinpath(prefix)
-            metacam_utils.delete_dir(prefix_dir, verbose=True)
-            prefix_dir.mkdir(parents=True, exist_ok=True)
 
-        # copy images and write transform.json
+            output_path = self.output_dir / prefix
+            summary_log.extend(metacam_utils.delete_dir(output_path, self.verbose))
+            output_path.mkdir(parents=True, exist_ok=True)
+
+        # copy images (undistort) and write transform.json
         frames = []
         num_frames = 0
         num_total_frames = 0
         cv2world = np.array([[0, 0, 1, 0], [-1, 0, 0, 0], [0, -1, 0, 0], [0, 0, 0, 1]])
-        """ Magic ...
-        from opencg to world
-        0 0 1
-        -1 0 0
-        0 -1  0
-        """
-        cg2cv = np.array([[1, 0, 0, 0], [0, -1, 0, 0], [0, 0, -1, 0], [0, 0, 0, 1]])
+        cg2cv = np.array([[1, 0, 0, 0], [0, -1, 0, 0], [0, 0, -1, 0], [0, 0, 0, 1]])  # IMPORTANT
+        reach_max = False
         for ff in front_frames:
+            if reach_max:
+                break
             num_frames += 1
             for prefix in prefixes:
                 f_name = ff["file_name"]
-                prefix_path = self.data.joinpath(prefix)
-                image_path = prefix_path.joinpath(f_name)
-                prefix_dir = prefix_dir.parent / prefix
+                prefix_path = self.data / prefix  # src
+                image_path = prefix_path / f_name
+                output_path = self.output_dir / prefix  # dst
                 if not image_path.exists():
                     summary_log.append(f"{image_path} not found...Skipped")
                     continue
                 if self.max_dataset_size > 0 and num_total_frames >= self.max_dataset_size:
-                    if self.verbose:
-                        summary_log.append(
-                            f"Reached max_dataset_size {self.max_dataset_size}. Ignore following frames."
-                        )
+                    reach_max = True
+                    summary_log.append(f"Reached max_dataset_size {self.max_dataset_size}. Ignore following frames.")
                     break
                 num_total_frames += 1
                 new_image_name = f"{num_frames:04d}" + image_path.suffix
@@ -934,21 +930,26 @@ class ProcessMetacam:
                 f2w = ff["c2w"] @ cv2world
                 transform_matrix = f2w @ x2f @ cg2cv
                 frame = {"file_path": prefix + "/" + new_image_name, "transform_matrix": transform_matrix.tolist()}
+                # mask
                 if prefix in masks.keys():
                     frame["mask_path"] = "masks/" + masks[prefix].name
 
-                for k in cameras[prefix]["intrinsics"].keys():
-                    frame[k] = cameras[prefix]["intrinsics"][k]
+                new_image_path = output_path / new_image_name
+                intrinsics = cameras[prefix]["intrinsics"]
+                summary_log.extend(metacam_utils.undistort_image(image_path, new_image_path, intrinsics, self.verbose))
+
+                for k in intrinsics:
+                    if k not in ["k1", "k2", "k3", "k4"]:
+                        frame[k] = intrinsics[k]
                 frames.append(frame)
-                metacam_utils.copy_image(image_path, prefix_dir.joinpath(new_image_name), self.verbose)
+
         summary_log.append(f"Got total camera {num_total_frames} images.")
 
         output = {
-            "camera_model": CAMERA_MODELS["fisheye"].value,
-            "frames": frames,
             "aabb_scale": 16,
             "scale": 0.2,
             "offset": [0, 0, 0],
+            "frames": frames,
         }
         with open(self.output_dir.joinpath("transforms.json"), "w", encoding="utf-8") as f:
             json.dump(output, f, indent=4)

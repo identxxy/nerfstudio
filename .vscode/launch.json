@@ -108,7 +108,7 @@
       "request": "launch",
       "program": "C:/Users/xuxin/AppData/Roaming/Python/Python39/Scripts/ns-train.exe",
       "console": "integratedTerminal",
-      "args": ["nerfacto", "--data", "data/crc_test"]
+      "args": ["nerfacto", "--data", "data/crc_test", "--viewer.local", "True"]
     }
   ]
 }
