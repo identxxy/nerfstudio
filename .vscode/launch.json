@@ -97,16 +97,16 @@
       "name": "Python: process metacam",
       "type": "python",
       "request": "launch",
-      "program": "C:/Users/xuxin/AppData/Roaming/Python/Python39/Scripts/ns-process-data.exe",
+      "program": "scripts/process_data.py",
       "console": "integratedTerminal",
-      "args": ["metacam", "--data", "D:/DATA/metacam/crc_test", "--output", "data/crc_test",
+      "args": ["metacam", "--data", "/home/xxy/data/floor8", "--output", "data/floor8",
       "--max_dataset_size", "-1"]
     },
     {
       "name": "Python: train metacam",
       "type": "python",
       "request": "launch",
-      "program": "C:/Users/xuxin/AppData/Roaming/Python/Python39/Scripts/ns-train.exe",
+      "program": "scripts/train.py",
       "console": "integratedTerminal",
       "args": ["nerfacto", "--data", "data/crc_test", "--viewer.local", "True"]
     }

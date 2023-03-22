@@ -972,6 +972,10 @@ class ProcessMetacam:
     """Path to the output directory."""
     mask: Path = Path()
     """Mask images folder containing `[front/left/right]_mask.jpg`"""
+    no_left: bool = False
+    """Whether ignore left images"""
+    no_right: bool = False
+    """Whether ignore right images"""
     num_downsample: int = 2
     """Scales to downsample"""
     max_dataset_size: int = 600
@@ -997,7 +1001,12 @@ class ProcessMetacam:
             raise ValueError(f"Images folder `front` not found.")
 
         summary_log = []
-        prefixes = ["front", "left", "right"]
+        prefixes = ["front"]
+        if not self.no_left:
+            prefixes.append("left")
+        if not self.no_right:
+            prefixes.append("right")
+
         masks = {}
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1007,7 +1016,7 @@ class ProcessMetacam:
         # poses csv
         front_frames = metacam_utils.read_images_and_odom(self.data.joinpath("front"), csv, c2l)
         num_front_frames = len(front_frames)
-        summary_log.append(f"Got front camera {num_front_frames} images.")
+        CONSOLE.print(f"Got front camera {num_front_frames} images.")
         if self.max_dataset_size > 0 and 3 * num_front_frames > self.max_dataset_size:
             summary_log.append(
                 f"Estimate totally {3 * num_front_frames} images, which is larger than max_dataset_size."
@@ -1029,7 +1038,7 @@ class ProcessMetacam:
                 mask_dir.mkdir(parents=True, exist_ok=True)
 
                 masks[prefix] = mask_dir / mask_l[0].name
-                summary_log.append(f"Loaded mask file {mask_l[0]} to {masks[prefix]}.")
+                CONSOLE.print(f"Loaded mask file {mask_l[0]} to {masks[prefix]}.")
                 metacam_utils.copy_image(mask_l[0], masks[prefix], self.verbose)
 
             output_path = self.output_dir / prefix
@@ -1043,6 +1052,7 @@ class ProcessMetacam:
         cv2world = np.array([[0, 0, 1, 0], [-1, 0, 0, 0], [0, -1, 0, 0], [0, 0, 0, 1]])
         cg2cv = np.array([[1, 0, 0, 0], [0, -1, 0, 0], [0, 0, -1, 0], [0, 0, 0, 1]])  # IMPORTANT
         reach_max = False
+        CONSOLE.print(f"Undistorting... This may take some time...")
         for ff in front_frames:
             if reach_max:
                 break

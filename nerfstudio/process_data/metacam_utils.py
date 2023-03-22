@@ -116,12 +116,14 @@ def read_images_and_odom(front: Path, odom: Path, c2l: np.ndarray) -> List:
     # images idx
     frames = []
     camera_time_l = []
-    for f in front.iterdir():
+    for f in sorted(front.iterdir()):
         s = f.stem
         camera_time = int(s[0:-9]) - start_sec + int(s[-9:]) / 1e9
         if camera_time > timestamp[0] and camera_time < timestamp[-1]:
             frames.append({"file_name": f.name})
             camera_time_l.append(camera_time)
+        else:
+            pass
     camera_time_np = np.array(camera_time_l)
 
     def interpolation(x, y, xnew):
