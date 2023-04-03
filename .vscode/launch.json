@@ -94,6 +94,25 @@
       "args": ["semantic_nerf"]
     },
     {
+      "name": "Python: NeuS on Replica",
+      "type": "python",
+      "request": "launch",
+      "program": "scripts/train.py",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "env": {"CUDA_VISIBLE_DEVICES":"0"},
+      "args": [
+        "neus",
+        "--pipeline.model.sdf-field.inside-outside=True",
+        "--pipeline.model.mono-depth-loss-mult=0.1",
+        "--pipeline.model.mono-normal-loss-mult=0.05",
+        "--vis=wandb",
+        "sdfstudio-data",
+        "--data=data/sdfstudio-demo-data/replica-room0",
+        "--include_mono_prior=True"
+      ]
+    },
+    {
       "name": "Python: process metacam",
       "type": "python",
       "request": "launch",
@@ -109,6 +128,6 @@
       "program": "scripts/train.py",
       "console": "integratedTerminal",
       "args": ["nerfacto", "--data", "data/crc_test", "--viewer.local", "True"]
-    }
+    },
   ]
 }
